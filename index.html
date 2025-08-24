@@ -52,19 +52,19 @@
   <script>
     async function fetchCoins() {
       try {
-        // Delta Exchange public API
         let response = await fetch("https://api.delta.exchange/v2/tickers");
         let data = await response.json();
-        
+
         let coinsTable = document.getElementById("coins");
         coinsTable.innerHTML = "";
 
-        data.result.forEach((coin) => {
+        // API ke andar `result` array hota hai
+        data.result.slice(0, 20).forEach((coin) => {  // sirf top 20 coins dikhayenge
           let row = `<tr>
               <td>${coin.symbol}</td>
               <td>${coin.last_price}</td>
               <td style="color:${coin.change_24h >= 0 ? 'green' : 'red'}">
-                ${coin.change_24h.toFixed(2)}
+                ${coin.change_24h ? coin.change_24h.toFixed(2) : "0.00"}
               </td>
               <td>${coin.volume}</td>
             </tr>`;
@@ -72,13 +72,16 @@
         });
       } catch (err) {
         console.error("Error fetching coins:", err);
+        document.getElementById("coins").innerHTML = 
+          `<tr><td colspan="4">⚠️ Failed to load data</td></tr>`;
       }
     }
 
-    // Fetch every 5 seconds
+    // First load + refresh every 5 seconds
     fetchCoins();
     setInterval(fetchCoins, 5000);
   </script>
 </body>
 </html>
+
 
