@@ -1,12 +1,84 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Delta Exchange App</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Delta Exchange Coins</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 20px;
+      background: #f4f4f9;
+    }
+    h1 {
+      text-align: center;
+      color: #333;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 20px;
+      background: white;
+      box-shadow: 0px 2px 6px rgba(0,0,0,0.1);
+    }
+    th, td {
+      padding: 12px;
+      border: 1px solid #ddd;
+      text-align: center;
+    }
+    th {
+      background: #0070f3;
+      color: white;
+    }
+    tr:nth-child(even) {
+      background: #f9f9f9;
+    }
+  </style>
 </head>
 <body>
-  <h1>Welcome to Delta-X 🚀</h1>
-  <p>This is your first deployed page on Vercel!</p>
+  <h1>Delta Exchange - Live Coin Prices</h1>
+  <table>
+    <thead>
+      <tr>
+        <th>Coin</th>
+        <th>Last Price</th>
+        <th>24h Change (%)</th>
+        <th>Volume</th>
+      </tr>
+    </thead>
+    <tbody id="coins"></tbody>
+  </table>
+
+  <script>
+    async function fetchCoins() {
+      try {
+        // Delta Exchange public API
+        let response = await fetch("https://api.delta.exchange/v2/tickers");
+        let data = await response.json();
+        
+        let coinsTable = document.getElementById("coins");
+        coinsTable.innerHTML = "";
+
+        data.result.forEach((coin) => {
+          let row = `<tr>
+              <td>${coin.symbol}</td>
+              <td>${coin.last_price}</td>
+              <td style="color:${coin.change_24h >= 0 ? 'green' : 'red'}">
+                ${coin.change_24h.toFixed(2)}
+              </td>
+              <td>${coin.volume}</td>
+            </tr>`;
+          coinsTable.innerHTML += row;
+        });
+      } catch (err) {
+        console.error("Error fetching coins:", err);
+      }
+    }
+
+    // Fetch every 5 seconds
+    fetchCoins();
+    setInterval(fetchCoins, 5000);
+  </script>
 </body>
 </html>
+
