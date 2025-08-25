@@ -3,66 +3,159 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Delta Exchange Coins</title>
+  <title>Delta Exchange - Live Coin Prices</title>
   <style>
-    body {
-      font-family: Arial, sans-serif;
-      margin: 20px;
-      background: #f4f4f9;
+    :root { --blue:#0b63e6; --bg:#f4f4f9; --card:#ffffff; --text:#222; }
+    *{box-sizing:border-box}
+    body{
+      margin:0; padding:16px; font-family:system-ui, Arial, sans-serif;
+      background:var(--bg); color:var(--text);
     }
-    h1 {
-      text-align: center;
-      color: #333;
+    h1{ text-align:center; margin:8px 0 16px }
+    .bar{
+      max-width:1100px; margin:0 auto 10px; display:flex; gap:8px; flex-wrap:wrap;
+      align-items:center; justify-content:center;
     }
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      margin-top: 20px;
-      background: white;
-      box-shadow: 0px 2px 6px rgba(0,0,0,0.1);
+    input{
+      flex:1 1 260px; padding:10px 12px; border:1px solid #dcdcdc; border-radius:10px;
+      background:#fff; outline:none;
     }
-    th, td {
-      padding: 12px;
-      border: 1px solid #ddd;
-      text-align: center;
+    .badge{font-size:12px; opacity:.7}
+    .table-wrap{ max-width:1100px; margin:0 auto; overflow:auto; border-radius:12px; }
+    table{ width:100%; border-collapse:collapse; background:var(--card); }
+    thead th{
+      position:sticky; top:0; background:var(--blue); color:#fff; font-weight:600;
+      padding:12px; text-align:center;
     }
-    th {
-      background: #0070f3;
-      color: white;
-    }
-    tr:nth-child(even) {
-      background: #f9f9f9;
-    }
+    td{ padding:10px 12px; border-top:1px solid #eee; text-align:center; }
+    tbody tr:nth-child(even){ background:#fafafa }
+    .up{color:#0aa83b;font-weight:600}
+    .down{color:#d7263d;font-weight:600}
+    .muted{opacity:.8}
+    .right{ text-align:right }
+    .center{ text-align:center }
+    .footer{ max-width:1100px; margin:8px auto 0; font-size:12px; text-align:center; opacity:.7 }
   </style>
 </head>
 <body>
   <h1>Delta Exchange - Live Coin Prices</h1>
-  <table>
-    <thead>
-      <tr>
-        <th>Coin</th>
-        <th>Last Price</th>
-        <th>24h Change (%)</th>
-        <th>Volume</th>
-      </tr>
-    </thead>
-    <tbody id="coins"></tbody>
-  </table>
+
+  <div class="bar">
+    <input id="search" placeholder="Search coin (e.g. BTC_USDT, XRPUSDT)"/>
+    <span class="badge" id="status">Loading…</span>
+  </div>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th style="min-width:140px">Coin</th>
+          <th class="right" style="min-width:140px">Last Price</th>
+          <th style="min-width:140px">24h Change</th>
+          <th class="right" style="min-width:140px">Volume (24h)</th>
+        </tr>
+      </thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </div>
+
+  <div class="footer">
+    Auto-refresh every 5s • Data: Delta Exchange public API
+  </div>
 
   <script>
-    async function fetchCoins() {
-      try {
-        let response = await fetch("https://api.delta.exchange/v2/tickers");
-        let data = await response.json();
+    const API = "https://api.delta.exchange/v2/tickers";
+    const rowsEl = document.getElementById("rows");
+    const searchEl = document.getElementById("search");
+    const statusEl = document.getElementById("status");
 
-        let coinsTable = document.getElementById("coins");
-        coinsTable.innerHTML = "";
+    function fmtNum(n, d=2){
+      if(n === null || n === undefined || Number.isNaN(n)) return "—";
+      const num = Number(n);
+      if(!Number.isFinite(num)) return "—";
+      if(Math.abs(num) >= 1000) return num.toLocaleString(undefined, {maximumFractionDigits:d});
+      return num.toFixed(d);
+    }
 
-        // API ke andar `result` array hota hai
-        data.result.slice(0, 20).forEach((coin) => {  // sirf top 20 coins dikhayenge
-          let row = `<tr>
-              <td>${coin.symbol}</td>
-              <td>${coin.last_price}</td>
+    function pickPrice(t){
+      // Robust fallbacks: use whichever exists
+      return Number(t.last_price ?? t.mark_price ?? t.index_price ?? t.close ?? t.price ?? NaN);
+    }
+
+    function pickChangePct(t){
+      // Prefer direct 24h change if present; else compute from price vs price_24h
+      if(t.change_24h !== undefined && t.change_24h !== null) {
+        const val = Number(t.change_24h);
+        // Some APIs return fraction (0.0215) instead of percent; normalize if small
+        return Math.abs(val) < 1 && Math.abs(val) > 0.0001 ? val * 100 : val;
+      }
+      const p = pickPrice(t);
+      const p24 = Number(t.price_24h ?? t.open_price_24h ?? t.prev_price_24h ?? NaN);
+      if(Number.isFinite(p) && Number.isFinite(p24) && p24 !== 0){
+        return ((p - p24) / p24) * 100;
+      }
+      return null;
+    }
+
+    function pickVolume(t){
+      return Number(t.volume ?? t.volume_24h ?? t.base_volume ?? t.turnover_24h ?? NaN);
+    }
+
+    let cache = [];
+
+    async function load(){
+      try{
+        statusEl.textContent = "Loading…";
+        const res = await fetch(API, { cache: "no-store" });
+        const json = await res.json();
+        const list = Array.isArray(json?.result) ? json.result : [];
+
+        // Map + sanitize
+        cache = list.map(t => ({
+          symbol: t.symbol || t.product_symbol || t.underlying_symbol || "—",
+          price: pickPrice(t),
+          changePct: pickChangePct(t),
+          vol: pickVolume(t)
+        }));
+
+        render();
+        statusEl.textContent = `Updated: ${new Date().toLocaleTimeString()}`;
+      }catch(e){
+        console.error(e);
+        statusEl.textContent = "Failed to load";
+        rowsEl.innerHTML = `<tr><td colspan="4" class="center">⚠️ Failed to fetch data</td></tr>`;
+      }
+    }
+
+    function render(){
+      const q = searchEl.value.trim().toUpperCase();
+      let data = cache;
+      if(q) data = data.filter(x => String(x.symbol).toUpperCase().includes(q));
+
+      // Sort by volume desc so active pairs show first
+      data = data.sort((a,b) => (b.vol||0) - (a.vol||0)).slice(0, 50);
+
+      rowsEl.innerHTML = data.map(d => {
+        const ch = d.changePct;
+        const cls = (ch ?? 0) >= 0 ? "up" : "down";
+        const sign = (ch ?? 0) > 0 ? "+" : "";
+        return `
+          <tr>
+            <td>${d.symbol}</td>
+            <td class="right">${fmtNum(d.price, 6)}</td>
+            <td class="${cls}">${Number.isFinite(ch) ? sign + fmtNum(ch, 2) + "%" : "—"}</td>
+            <td class="right muted">${fmtNum(d.vol, 0)}</td>
+          </tr>
+        `;
+      }).join("") || `<tr><td colspan="4" class="center">No results</td></tr>`;
+    }
+
+    searchEl.addEventListener("input", render);
+    load();
+    setInterval(load, 5000);
+  </script>
+</body>
+</html>
               <td style="color:${coin.change_24h >= 0 ? 'green' : 'red'}">
                 ${coin.change_24h ? coin.change_24h.toFixed(2) : "0.00"}
               </td>
